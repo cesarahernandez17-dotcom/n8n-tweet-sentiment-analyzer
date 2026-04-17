@@ -1,0 +1,752 @@
+{
+  "name": "Entregable",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "35edf8b6-2a99-49b6-9475-74253ef4f4bb",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2032,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1SVV8rleZ4b1gpTjGKzoOSvSiccC8kIQDFKE95qEO2rQ",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Hoja 1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "beecfd47-9681-49ee-a440-d0f0f51517cd",
+      "name": "Leer Tweets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -1840,
+        1040
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "IWAoLVywRU1kHJe5",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1SVV8rleZ4b1gpTjGKzoOSvSiccC8kIQDFKE95qEO2rQ",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Log",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "90eaad94-1105-4258-bff9-900207547c7e",
+      "name": "Leer Log Procesados",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -1840,
+        1312
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "IWAoLVywRU1kHJe5",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Obtener todos los tweets de Hoja 1\nconst allTweets = $('Leer Tweets').all().map(i => i.json);\n\n// Obtener textos ya procesados del Log\nlet processedTexts = new Set();\ntry {\n  const logRows = $('Leer Log Procesados').all();\n  logRows.forEach(row => {\n    const texto = row.json['texto '] ?? row.json['texto'] ?? '';\n    if (texto) processedTexts.add(texto.trim());\n  });\n} catch(e) {\n  // Log vacío, procesar todo\n}\n\n// Filtrar solo los tweets que NO están en el log\nconst unprocessed = allTweets.filter(row => {\n  const tweet = (row.tweet ?? '').trim();\n  return tweet !== '' && !processedTexts.has(tweet);\n});\n\nif (unprocessed.length === 0) {\n  return [];\n}\n\nreturn unprocessed.map(row => ({ json: row }));"
+      },
+      "id": "08a4fc8b-96f5-4d45-a57f-d85205adfaa5",
+      "name": "Filtrar No Procesados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1616,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "set_tweet",
+              "name": "tweet_text",
+              "value": "={{ $json.tweet }}",
+              "type": "string"
+            },
+            {
+              "id": "set_author",
+              "name": "tweet_author",
+              "value": "={{ $json.author ?? 'Desconocido' }}",
+              "type": "string"
+            },
+            {
+              "id": "set_date",
+              "name": "tweet_date",
+              "value": "={{ $json.date ?? $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "45d113be-d629-4ca3-9a82-a8db56fbffae",
+      "name": "Preparar Datos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1376,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.text ?? '';\n\nlet parsed;\ntry {\n  const cleaned = raw.trim().replace(/^```json\\n?/, '').replace(/\\n?```$/, '');\n  parsed = JSON.parse(cleaned);\n} catch(e) {\n  const upper = raw.toUpperCase();\n  let sentiment = 'NEUTRAL';\n  if (upper.includes('NEGATIVO')) sentiment = 'NEGATIVO';\n  else if (upper.includes('POSITIVO')) sentiment = 'POSITIVO';\n  parsed = { sentiment, score: 0.5, parse_error: true };\n}\n\nconst valid = ['POSITIVO', 'NEGATIVO', 'NEUTRAL'];\nif (!valid.includes(parsed.sentiment)) {\n  parsed.sentiment = 'NEUTRAL';\n  parsed.parse_error = true;\n}\n\nreturn [{\n  json: {\n    ...($input.first().json),\n    sentiment: parsed.sentiment,\n    sentiment_score: parsed.score ?? 0.5,\n    parse_error: parsed.parse_error ?? false,\n    raw_llm_response: raw\n  }\n}];"
+      },
+      "id": "a5645a95-66ab-4f7c-bcb2-0992d2708570",
+      "name": "Parsear Respuesta LLM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond_negativo",
+              "leftValue": "={{ $json.sentiment }}",
+              "rightValue": "NEGATIVO",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f17a3138-26fa-4a14-911a-85e608ceafaf",
+      "name": "¿Es NEGATIVO?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -944,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.text ?? '';\n\n// Recuperar datos originales del tweet desde nodos anteriores\nconst tweet_text = $('Preparar Datos').first().json.tweet_text ?? 'No disponible';\nconst tweet_author = $('Preparar Datos').first().json.tweet_author ?? 'No disponible';\nconst tweet_date = $('Preparar Datos').first().json.tweet_date ?? 'No disponible';\nconst sentiment_score = $('Parsear Respuesta LLM').first().json.sentiment_score ?? 0;\n\nlet analysis;\ntry {\n  const cleaned = raw.trim().replace(/^```json\\n?/, '').replace(/\\n?```$/, '');\n  analysis = JSON.parse(cleaned);\n} catch(e) {\n  analysis = {\n    summary: 'No se pudo parsear el análisis. Revisar manualmente.',\n    reasons: ['Error de parsing en LLM 2'],\n    suggested_action: 'Revisión manual requerida',\n    urgency: 'MEDIA',\n    parse_error: true\n  };\n}\n\nconst reasons = (analysis.reasons ?? []).map((r, i) => `${i + 1}. ${r}`).join('<br/>');\nconst urgencyColor = { 'ALTA': '#DC2626', 'MEDIA': '#D97706', 'BAJA': '#16A34A' }[analysis.urgency] ?? '#6B7280';\nconst score = (sentiment_score * 100).toFixed(0);\n\nconst emailHtml = `<!DOCTYPE html>\n<html>\n<head><meta charset=\"UTF-8\"></head>\n<body style=\"font-family: Arial, sans-serif; background: #f3f4f6; padding: 20px; margin: 0;\">\n  <div style=\"max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);\">\n    <div style=\"background: #DC2626; padding: 20px 24px;\">\n      <h1 style=\"color: white; margin: 0; font-size: 20px;\">⚠️ Alerta: Tweet Negativo Detectado</h1>\n      <p style=\"color: #FCA5A5; margin: 4px 0 0 0; font-size: 13px;\">Sistema de monitoreo automático de reputación</p>\n    </div>\n    <div style=\"padding: 20px 24px; border-bottom: 1px solid #E5E7EB;\">\n      <table style=\"width: 100%; border-collapse: collapse;\">\n        <tr>\n          <td style=\"padding: 6px 0; color: #6B7280; font-size: 13px; width: 120px;\"><b>Autor</b></td>\n          <td style=\"padding: 6px 0; font-size: 13px; color: #111827;\">${tweet_author}</td>\n        </tr>\n        <tr>\n          <td style=\"padding: 6px 0; color: #6B7280; font-size: 13px;\"><b>Fecha</b></td>\n          <td style=\"padding: 6px 0; font-size: 13px; color: #111827;\">${tweet_date}</td>\n        </tr>\n        <tr>\n          <td style=\"padding: 6px 0; color: #6B7280; font-size: 13px;\"><b>Confianza</b></td>\n          <td style=\"padding: 6px 0; font-size: 13px; color: #111827;\">${score}%</td>\n        </tr>\n        <tr>\n          <td style=\"padding: 6px 0; color: #6B7280; font-size: 13px;\"><b>Urgencia</b></td>\n          <td style=\"padding: 6px 0;\">\n            <span style=\"background: ${urgencyColor}; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: bold;\">${analysis.urgency}</span>\n          </td>\n        </tr>\n      </table>\n    </div>\n    <div style=\"padding: 16px 24px; background: #FEF2F2; border-left: 4px solid #DC2626; margin: 20px 24px; border-radius: 4px;\">\n      <p style=\"margin: 0; font-size: 13px; color: #374151; font-style: italic;\">\"${tweet_text}\"</p>\n    </div>\n    <div style=\"padding: 0 24px 20px;\">\n      <h3 style=\"color: #111827; font-size: 14px; margin-bottom: 6px;\">📋 Resumen</h3>\n      <p style=\"color: #374151; font-size: 13px; margin: 0 0 16px 0;\">${analysis.summary}</p>\n      <h3 style=\"color: #111827; font-size: 14px; margin-bottom: 6px;\">❗ Motivos de negatividad</h3>\n      <p style=\"color: #374151; font-size: 13px; margin: 0 0 16px 0; line-height: 1.8;\">${reasons}</p>\n      <h3 style=\"color: #111827; font-size: 14px; margin-bottom: 6px;\">💡 Acción sugerida</h3>\n      <p style=\"color: #374151; font-size: 13px; margin: 0;\">${analysis.suggested_action}</p>\n    </div>\n    <div style=\"background: #F9FAFB; padding: 12px 24px; text-align: center;\">\n      <p style=\"color: #9CA3AF; font-size: 11px; margin: 0;\">Generado automáticamente por el sistema de monitoreo n8n</p>\n    </div>\n  </div>\n</body>\n</html>`;\n\nreturn [{\n  json: {\n    tweet_text,\n    tweet_author,\n    tweet_date,\n    sentiment_score,\n    analysis_summary: analysis.summary,\n    analysis_reasons: analysis.reasons ?? [],\n    analysis_action: analysis.suggested_action,\n    analysis_urgency: analysis.urgency ?? 'MEDIA',\n    email_html: emailHtml,\n    email_subject: `[${analysis.urgency ?? 'MEDIA'}] Tweet negativo detectado - ${tweet_author}`\n  }\n}];"
+      },
+      "id": "82bfe3af-807f-41c9-b838-4e317a31cb73",
+      "name": "Parsear Análisis + Armar Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        1008
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "cesarahernandez.17@gmail.com",
+        "subject": "={{ $json.email_subject }}",
+        "message": "={{ $json.email_html }}",
+        "options": {
+          "senderName": "Clasificador de Tweets"
+        }
+      },
+      "id": "b4c371f8-efa7-4139-a6ce-b27f97c84c18",
+      "name": "Enviar Email de Alerta",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -160,
+        1008
+      ],
+      "webhookId": "3fab2f58-5683-4121-b53b-b12b11cb6dd8",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "WLmNhyBqdti8yX9l",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1SVV8rleZ4b1gpTjGKzoOSvSiccC8kIQDFKE95qEO2rQ",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fecha_procesado": "={{ $now }}",
+            "autor": "={{ $('Preparar Datos').first().json.tweet_author }}",
+            "texto ": "={{ $('Preparar Datos').first().json.tweet_text }}",
+            "sentimiento ": "={{ $('Parsear Respuesta LLM').first().json.sentiment }}",
+            "score": "={{ $('Parsear Respuesta LLM').first().json.sentiment_score }}",
+            "accion": "=email_enviado"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "fecha_procesado",
+              "displayName": "fecha_procesado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "autor",
+              "displayName": "autor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "texto ",
+              "displayName": "texto ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sentimiento ",
+              "displayName": "sentimiento ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "accion",
+              "displayName": "accion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "09eed109-e0c1-4bcb-ba3d-ca8beb499029",
+      "name": "Log en Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        64,
+        1136
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "IWAoLVywRU1kHJe5",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un clasificador de sentimientos especializado en tweets de negocios. Tu única tarea es analizar el texto recibido y devolver EXCLUSIVAMENTE un JSON válido con el siguiente formato, sin texto adicional, sin markdown, sin explicaciones:\n{\"sentiment\":\"NEGATIVO\",\"score\":0.95}\nLos únicos valores válidos para sentiment son: POSITIVO, NEGATIVO, NEUTRAL.\nEl score debe ser un número decimal entre 0.0 y 1.0 que indica la confianza en la clasificación.\n\nClasifica el sentimiento de este tweet:\n\n{{ $json.tweet_text }}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "message": "=Eres un clasificador de sentimientos especializado en tweets de negocios. Tu única tarea es analizar el texto recibido y devolver EXCLUSIVAMENTE un JSON válido con el siguiente formato, sin texto adicional, sin markdown, sin explicaciones: {\"sentiment\":\"NEGATIVO\",\"score\":0.95} Los únicos valores válidos para sentiment son: POSITIVO, NEGATIVO, NEUTRAL. El score debe ser un número decimal entre 0.0 y 1.0 que indica la confianza en la clasificación.  Clasifica el sentimiento de este tweet:  {{ $json.tweet_text }}"
+            }
+          ]
+        }
+      },
+      "id": "bae7032d-7d2e-4f86-a205-c7824e5ae065",
+      "name": "LLM 1 - Clasificador de Sentimiento",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        -1376,
+        1136
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0
+        }
+      },
+      "id": "7589dbdc-1c88-4921-88c0-6b15c62a1d34",
+      "name": "Groq - Clasificador",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -1376,
+        1360
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "LxPEoU1BfOOcF9so",
+          "name": "Groq account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un analista de reputación de marca. Devuelve EXCLUSIVAMENTE un JSON válido con este formato, sin texto adicional:\n{\"summary\":\"Resumen breve del tweet en 1-2 oraciones\",\"reasons\":[\"Razón 1\",\"Razón 2\"],\"suggested_action\":\"Acción recomendada\",\"urgency\":\"ALTA|MEDIA|BAJA\"}\n\nAnaliza este tweet negativo:\nTexto: {{ $json.tweet_text }}\nAutor: {{ $json.tweet_author }}\nFecha: {{ $json.tweet_date }}\nScore de negatividad: {{ $json.sentiment_score }}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "message": "=Eres un clasificador de sentimientos especializado en tweets de negocios. Tu única tarea es analizar el texto recibido y devolver EXCLUSIVAMENTE un JSON válido con el siguiente formato, sin texto adicional, sin markdown, sin explicaciones: {\"sentiment\":\"NEGATIVO\",\"score\":0.95} Los únicos valores válidos para sentiment son: POSITIVO, NEGATIVO, NEUTRAL. El score debe ser un número decimal entre 0.0 y 1.0 que indica la confianza en la clasificación.  Clasifica el sentimiento de este tweet:  {{ $json.tweet_text }}"
+            }
+          ]
+        }
+      },
+      "id": "98685942-618d-4df4-800b-b5398e04f01d",
+      "name": "LLM 2 - Analizador de Tweet Negativo",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        -736,
+        1008
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "cd8fd2e8-721e-4d09-a9b5-9d7115973ce0",
+      "name": "Groq - Analizador",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -736,
+        1136
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "LxPEoU1BfOOcF9so",
+          "name": "Groq account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres un experto en community management. Redacta una respuesta breve y cálida para un tweet positivo. Devuelve EXCLUSIVAMENTE un JSON válido:\n{\"draft\":\"texto de la respuesta lista para publicar\",\"tone\":\"ENTUSIASTA|AGRADECIDO|CERCANO\"}\n\nReglas: máximo 2 oraciones, incluir el @autor, 1 emoji, sin frases genéricas.\n\nTweet positivo:\nTexto: {{ $json.tweet_text }}\nAutor: {{ $json.tweet_author }}",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "message": "=Eres un experto en community management. Redacta una respuesta breve y cálida para un tweet positivo. Devuelve EXCLUSIVAMENTE un JSON válido: {\"draft\":\"texto de la respuesta lista para publicar\",\"tone\":\"ENTUSIASTA\nAGRADECIDO\nCERCANO\"}  Reglas: máximo 2 oraciones, incluir el @autor, 1 emoji, sin frases genéricas.  Tweet positivo: Texto: {{ $json.tweet_text }} Autor: {{ $json.tweet_author }}"
+            }
+          ]
+        }
+      },
+      "id": "fbaaaa36-fe4b-43f2-975f-bd4a8c456aa3",
+      "name": "LLM 3 - Generador de Respuesta Positiva",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        -736,
+        1328
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "1d4f35b5-8bc5-4f0c-b0e1-1d844c0b6aab",
+      "name": "Groq - Respuesta Positiva",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -736,
+        1456
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "LxPEoU1BfOOcF9so",
+          "name": "Groq account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.llm_text ?? '';\nconst inputData = $input.first().json;\nconst tweet_text = inputData.tweet_text ?? inputData.tweet ?? 'No disponible';\nconst tweet_author = inputData.tweet_author ?? inputData.author ?? 'No disponible';\nconst tweet_date = inputData.tweet_date ?? inputData.date ?? 'No disponible';\nconst sentiment_score = inputData.sentiment_score ?? 0;\n\nlet analysis;\ntry {\n  const cleaned = raw.trim().replace(/^```json\\n?/, '').replace(/\\n?```$/, '');\n  analysis = JSON.parse(cleaned);\n} catch(e) {\n  analysis = {\n    draft: 'No se pudo generar el borrador. Revisar manualmente.',\n    tone: 'AGRADECIDO',\n    parse_error: true\n  };\n}\n\nconst toneEmoji = { 'ENTUSIASTA': '🎉', 'AGRADECIDO': '🙏', 'CERCANO': '😊' }[analysis.tone] ?? '✨';\nconst score = (sentiment_score * 100).toFixed(0);\n\nconst emailHtml = `<!DOCTYPE html>\n<html>\n<head><meta charset=\"UTF-8\"></head>\n<body style=\"font-family: Arial, sans-serif; background: #f3f4f6; padding: 20px; margin: 0;\">\n  <div style=\"max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);\">\n    <div style=\"background: #16A34A; padding: 20px 24px;\">\n      <h1 style=\"color: white; margin: 0; font-size: 20px;\">💚 Tweet Positivo Detectado</h1>\n      <p style=\"color: #BBF7D0; margin: 4px 0 0 0; font-size: 13px;\">Oportunidad de engagement para community management</p>\n    </div>\n    <div style=\"padding: 20px 24px; border-bottom: 1px solid #E5E7EB;\">\n      <table style=\"width: 100%; border-collapse: collapse;\">\n        <tr>\n          <td style=\"padding: 6px 0; color: #6B7280; font-size: 13px; width: 120px;\"><b>Autor</b></td>\n          <td style=\"padding: 6px 0; font-size: 13px; color: #111827;\">${tweet_author}</td>\n        </tr>\n        <tr>\n          <td style=\"padding: 6px 0; color: #6B7280; font-size: 13px;\"><b>Fecha</b></td>\n          <td style=\"padding: 6px 0; font-size: 13px; color: #111827;\">${tweet_date}</td>\n        </tr>\n        <tr>\n          <td style=\"padding: 6px 0; color: #6B7280; font-size: 13px;\"><b>Confianza</b></td>\n          <td style=\"padding: 6px 0; font-size: 13px; color: #111827;\">${score}%</td>\n        </tr>\n        <tr>\n          <td style=\"padding: 6px 0; color: #6B7280; font-size: 13px;\"><b>Tono</b></td>\n          <td style=\"padding: 6px 0;\">\n            <span style=\"background: #16A34A; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: bold;\">${toneEmoji} ${analysis.tone}</span>\n          </td>\n        </tr>\n      </table>\n    </div>\n    <div style=\"padding: 16px 24px; background: #F0FDF4; border-left: 4px solid #16A34A; margin: 20px 24px; border-radius: 4px;\">\n      <p style=\"margin: 0; font-size: 13px; color: #374151; font-style: italic;\">\"${tweet_text}\"</p>\n    </div>\n    <div style=\"padding: 0 24px 20px;\">\n      <h3 style=\"color: #111827; font-size: 14px; margin-bottom: 8px;\">✏️ Borrador de respuesta sugerida</h3>\n      <div style=\"background: #F9FAFB; border: 1px dashed #16A34A; border-radius: 6px; padding: 14px;\">\n        <p style=\"color: #111827; font-size: 14px; margin: 0; line-height: 1.6;\">${analysis.draft}</p>\n      </div>\n      <p style=\"color: #9CA3AF; font-size: 11px; margin: 8px 0 0 0;\">Podés copiar y pegar este texto directamente en Twitter/X</p>\n    </div>\n    <div style=\"background: #F9FAFB; padding: 12px 24px; text-align: center;\">\n      <p style=\"color: #9CA3AF; font-size: 11px; margin: 0;\">Generado automáticamente por el sistema de monitoreo n8n</p>\n    </div>\n  </div>\n</body>\n</html>`;\n\nreturn [{\n  json: {\n    tweet_text,\n    tweet_author,\n    tweet_date,\n    sentiment_score,\n    positive_draft: analysis.draft,\n    positive_tone: analysis.tone,\n    action_taken: 'email_borrador_enviado',\n    email_html: emailHtml,\n    email_subject: `[POSITIVO] Nuevo tweet de ${tweet_author} - Borrador listo`\n  }\n}];"
+      },
+      "id": "ede36021-a63a-4dfb-8095-a6099250ef85",
+      "name": "Parsear Respuesta Positiva",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        1328
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "cesarahernandez.17@gmail.com",
+        "subject": "={{ $json.email_subject }}",
+        "message": "={{ $json.email_html }}",
+        "options": {
+          "senderName": "Clasificador de Tweets"
+        }
+      },
+      "id": "dddf64ef-1d6f-4588-89e1-fe6a5ef66909",
+      "name": "Enviar Email Borrador Positivo",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -80,
+        1296
+      ],
+      "webhookId": "69cb1fdd-0ef8-4a4e-9c6d-e2a0c5902c40",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "WLmNhyBqdti8yX9l",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1164252f-597a-4769-8887-f45d439e9ca9",
+              "name": "tweet_text",
+              "value": "={{ $('Preparar Datos').item.json.tweet_text }}",
+              "type": "string"
+            },
+            {
+              "id": "c5151a2e-662d-43fb-ab48-09aa7d8ca124",
+              "name": "tweet_author",
+              "value": "={{ $('Preparar Datos').item.json.tweet_author }}",
+              "type": "string"
+            },
+            {
+              "id": "c4661846-18c6-4874-9774-c025ec955386",
+              "name": "tweet_date",
+              "value": "={{ $('Preparar Datos').item.json.tweet_date }}",
+              "type": "string"
+            },
+            {
+              "id": "1671ca0d-18e9-4644-beba-1639dbc5ec66",
+              "name": "sentiment_score",
+              "value": "={{ $('Parsear Respuesta LLM').item.json.sentiment_score }}",
+              "type": "string"
+            },
+            {
+              "id": "3eead798-33e9-4f49-9bd5-1f608ef43f7e",
+              "name": "llm_text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -432,
+        1328
+      ],
+      "id": "a08f08f2-234f-4502-b8df-09eef93d3f8c",
+      "name": "Datos Positivos"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Leer Tweets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Tweets": {
+      "main": [
+        [
+          {
+            "node": "Leer Log Procesados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar No Procesados": {
+      "main": [
+        [
+          {
+            "node": "Preparar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Datos": {
+      "main": [
+        [
+          {
+            "node": "LLM 1 - Clasificador de Sentimiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM 1 - Clasificador de Sentimiento": {
+      "main": [
+        [
+          {
+            "node": "Parsear Respuesta LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq - Clasificador": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM 1 - Clasificador de Sentimiento",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Respuesta LLM": {
+      "main": [
+        [
+          {
+            "node": "¿Es NEGATIVO?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es NEGATIVO?": {
+      "main": [
+        [
+          {
+            "node": "LLM 2 - Analizador de Tweet Negativo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM 3 - Generador de Respuesta Positiva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM 2 - Analizador de Tweet Negativo": {
+      "main": [
+        [
+          {
+            "node": "Parsear Análisis + Armar Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq - Analizador": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM 2 - Analizador de Tweet Negativo",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Análisis + Armar Email": {
+      "main": [
+        [
+          {
+            "node": "Enviar Email de Alerta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Email de Alerta": {
+      "main": [
+        [
+          {
+            "node": "Log en Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM 3 - Generador de Respuesta Positiva": {
+      "main": [
+        [
+          {
+            "node": "Datos Positivos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq - Respuesta Positiva": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM 3 - Generador de Respuesta Positiva",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Respuesta Positiva": {
+      "main": [
+        [
+          {
+            "node": "Enviar Email Borrador Positivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Email Borrador Positivo": {
+      "main": [
+        [
+          {
+            "node": "Log en Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Log Procesados": {
+      "main": [
+        [
+          {
+            "node": "Filtrar No Procesados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos Positivos": {
+      "main": [
+        [
+          {
+            "node": "Parsear Respuesta Positiva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "9200d0be-af38-4e05-8266-3ed8dbbe72a3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "408b7a7599855cdcd927e17d5d9f8ead08d417beddf56d93c77986d98063e352"
+  },
+  "id": "eAT8MhU1VQie9bUQ",
+  "tags": []
+}

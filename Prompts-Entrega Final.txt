@@ -1,0 +1,150 @@
+================================================================
+PROMPTS UTILIZADOS EN CADA NODO LLM
+Proyecto: Análisis Automatizado de Tweets con n8n + Gmail
+Modelo: Groq - Llama 3.1 8B Instant
+================================================================
+
+----------------------------------------------------------------
+NODO LLM 1: Clasificador de Sentimiento
+Modelo: llama-3.1-8b-instant | Temperature: 0
+Nodos: LLM 1 - Clasificador de Sentimiento + Groq - Clasificador
+----------------------------------------------------------------
+
+[PROMPT]
+Eres un clasificador de sentimientos especializado en tweets de negocios.
+Tu única tarea es analizar el texto recibido y devolver EXCLUSIVAMENTE un
+JSON válido con el siguiente formato, sin texto adicional, sin markdown,
+sin explicaciones:
+{"sentiment":"NEGATIVO","score":0.95}
+
+Los únicos valores válidos para sentiment son: POSITIVO, NEGATIVO, NEUTRAL.
+El score debe ser un número decimal entre 0.0 y 1.0 que indica la
+confianza en la clasificación.
+
+Clasifica el sentimiento de este tweet:
+
+{{ $json.tweet_text }}
+
+--- JUSTIFICACIÓN DE DISEÑO ---
+- Temperature = 0 para respuestas determinísticas y consistentes.
+- Se pide JSON estricto para facilitar el parsing en el condicional.
+- Solo 3 categorías para evitar ambigüedades que rompan la lógica.
+- No se piden explicaciones: mantiene el output minimalista.
+
+--- EJEMPLOS DE SALIDA ESPERADA ---
+Tweet: "Su servicio es un desastre, llevo 3 días sin respuesta"
+Output: {"sentiment":"NEGATIVO","score":0.97}
+
+Tweet: "Acabo de recibir mi pedido y todo perfecto! Los recomiendo!"
+Output: {"sentiment":"POSITIVO","score":0.94}
+
+Tweet: "¿Cuánto tarda el envío a Buenos Aires?"
+Output: {"sentiment":"NEUTRAL","score":0.82}
+
+
+----------------------------------------------------------------
+NODO LLM 2: Analizador de Tweet Negativo
+Modelo: llama-3.1-8b-instant | Temperature: 0.3
+Nodos: LLM 2 - Analizador de Tweet Negativo + Groq - Analizador
+----------------------------------------------------------------
+
+[PROMPT]
+Eres un analista de reputación de marca. Devuelve EXCLUSIVAMENTE un JSON
+válido con este formato, sin texto adicional:
+{"summary":"Resumen breve del tweet en 1-2 oraciones","reasons":["Razón 1","Razón 2"],"suggested_action":"Acción recomendada","urgency":"ALTA|MEDIA|BAJA"}
+
+Analiza este tweet negativo:
+Texto: {{ $json.tweet_text }}
+Autor: {{ $json.tweet_author }}
+Fecha: {{ $json.tweet_date }}
+Score de negatividad: {{ $json.sentiment_score }}
+
+--- JUSTIFICACIÓN DE DISEÑO ---
+- Temperature = 0.3 permite variación natural en el lenguaje del resumen.
+- Se incluye el score del LLM 1 para dar contexto de la intensidad.
+- El campo urgency permite priorizar en el equipo de community management.
+- Se pide suggested_action para hacer el email accionable.
+
+Criterios de urgencia aplicados por el modelo:
+- ALTA: pérdida de dinero, problema legal, daño a la salud, alto potencial viral
+- MEDIA: queja de servicio, demora, producto defectuoso sin consecuencias graves
+- BAJA: comentario negativo leve, sugerencia de mejora
+
+--- EJEMPLO DE SALIDA ESPERADA ---
+Tweet: "Me cobraron dos veces y no me responden hace 5 días. Voy a hacer la denuncia."
+Output:
+{
+  "summary": "Cliente reporta doble cobro sin respuesta del soporte tras 5 días.",
+  "reasons": [
+    "Error de facturación con doble cobro",
+    "Ausencia de respuesta del soporte durante 5 días",
+    "Amenaza de denuncia formal"
+  ],
+  "suggested_action": "Contactar al cliente de inmediato y verificar el cobro duplicado.",
+  "urgency": "ALTA"
+}
+
+
+----------------------------------------------------------------
+NODO LLM 3: Generador de Respuesta Positiva
+Modelo: llama-3.1-8b-instant | Temperature: 0.7
+Nodos: LLM 3 - Generador de Respuesta Positiva + Groq - Respuesta Positiva
+----------------------------------------------------------------
+
+[PROMPT]
+Eres un experto en community management. Redacta una respuesta breve y
+cálida para un tweet positivo. Devuelve EXCLUSIVAMENTE un JSON válido:
+{"draft":"texto de la respuesta lista para publicar","tone":"ENTUSIASTA|AGRADECIDO|CERCANO"}
+
+Reglas: máximo 2 oraciones, incluir el @autor, 1 emoji, sin frases genéricas.
+
+Tweet positivo:
+Texto: {{ $json.tweet_text }}
+Autor: {{ $json.tweet_author }}
+
+--- JUSTIFICACIÓN DE DISEÑO ---
+- Temperature = 0.7 para respuestas más creativas y naturales.
+- Se pide incluir el @autor para personalizar la respuesta.
+- Se prohíben frases genéricas para que el borrador sea usable directamente.
+- El campo tone permite al equipo filtrar por estilo de respuesta.
+
+--- EJEMPLO DE SALIDA ESPERADA ---
+Tweet: "Recibí mi pedido perfectamente empaquetado, los amo!"
+Output:
+{
+  "draft": "¡Nos alegra muchísimo @usuario! Cada detalle del packaging lo hacemos con cariño para vos 🎁",
+  "tone": "CERCANO"
+}
+
+
+================================================================
+NOTAS SOBRE LIMITACIONES Y SESGOS
+================================================================
+
+1. IRONÍA Y SARCASMO
+   Los modelos pueden no detectar correctamente el sarcasmo en español
+   rioplatense. Ejemplo: "Qué GENIAL que su web esté caída un lunes..."
+   puede clasificarse como POSITIVO si el modelo no capta la ironía.
+
+2. MODISMOS REGIONALES
+   Expresiones locales argentinas pueden reducir la precisión del
+   clasificador al no estar bien representadas en el entrenamiento.
+
+3. SESGO DE DOMINIO
+   Sin contexto del negocio específico en el prompt, algunos términos
+   técnicos pueden clasificarse incorrectamente.
+
+4. LÍMITE DE TOKENS
+   Tweets muy largos pueden superar el contexto óptimo del modelo.
+   Solución: truncar a 280 caracteres antes de enviar al LLM 1.
+
+5. RATE LIMIT DE GROQ
+   El plan gratuito de Groq tiene límite de requests por minuto.
+   Si se procesan muchos tweets a la vez puede generarse un error
+   de rate limit. Solución: aumentar el intervalo del Schedule Trigger.
+
+6. CONSISTENCIA DEL JSON
+   Con temperature=0, el LLM 1 es muy consistente. Sin embargo, ante
+   textos muy ambiguos puede variar el formato. El nodo de parsing
+   tiene fallback para estos casos mediante búsqueda de keywords.
+================================================================
